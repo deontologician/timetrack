@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 from cmd import Cmd
 import cPickle
 import sqlite3
@@ -6,37 +8,40 @@ from datetime import datetime, date, time, timedelta
 
 cursor = sqlite3.connect('timetrack.db')
 
-def str_to_datetime(s):
-    return cPickle.loads(s)
-
-def datetime_to_str(dt):
-    return cPickle.dumps(dt)
-
-sqlite3.register_converter('datetime', str_to_datetime)
-sqlite3.register_adapter(datetime, datetime_to_str)
-
 def prettytimes(dt1, dt2):
     '''Prints two times in a nice format'''
-    return ' '.join([dt1.strftime('%m/%d/%y %I:%M%p'),
-                     dt1.strftime('%I:%M%p')])
+    return ' '.join([dt1.strftime('%m/%d/%Y %I:%M%p'),
+                     dt2.strftime('%I:%M%p')])
 
 class TimeTracker(Cmd):
     '''Keeps track of time!'''
     
     def __init__(self, dbname='timetrack.db'):
-        self.conn = sqlite3.connect(dbname, detect_types=sqlite3.PARSE_DECLTYPES)
-        self.date = date.today()
-        self.prompt = '@:: '
+        self.conn = sqlite3.connect(dbname, 
+                 detect_types=sqlite3.PARSE_DECLTYPES| sqlite3.PARSE_COLNAMES)
         self.tablename = 'events'
+        try:
+            self.date = self.conn.execute("SELECT max(end) as 'end [timestamp]' from {}"\
+                                              .format(self.tablename)).next()[0].date()
+        except Exception as e:
+            print(e)
+            self.date = date.today() - timedelta(1)
+        print("Date is set for {}".format(self.date))
+        self.prompt = '@:: '
         Cmd.__init__(self)
 
     def default(self, entry):
         r'''Add a new entry to the timetrack database'''
-        code, subcode, start, end, name = entry.split(' ', 4)
+        code, subcode, rest = entry.split(' ', 2)
+        name, start, end = rest.rsplit(' ', 2)
         if len(subcode) > 1 or not re.match(r'[A-Z]', subcode):
             subcode = None
         start = datetime.combine(self.date, time(*divmod(int(start), 100)))
-        end = datetime.combine(self.date, time(*divmod(int(end), 100)))
+        end_time = time(*divmod(int(end), 100))
+        if end_time < start.time():
+            self.date += timedelta(1)
+            print('Date moved forward to {}'.format(self.date))
+        end = datetime.combine(self.date, end_time)
         with self.conn:
             self.conn.execute('INSERT INTO events (code, subcode, name, start, end)'
                               'VALUES (?, ?, ?, ?, ?)', (code, subcode, name, start, end))
@@ -44,10 +49,10 @@ class TimeTracker(Cmd):
     def do_create(self, line):
         with self.conn:
             self.conn.execute('CREATE TABLE {} (id integer primary key autoincrement,'
-                              'code text, subcode text, name text, start datetime,'
-                              'end datetime)'.format(self.tablename)
+                              'code text, subcode text, name text, start timestamp,'
+                              'end timestamp)'.format(self.tablename)
                          )
-            print 'Successfully initialized timetrack database.'
+            print('Successfully initialized timetrack database.')
 
     def do_nextday(self, line):
         try:
@@ -64,7 +69,7 @@ class TimeTracker(Cmd):
         self.date = self.date - timedelta(days)
 
     def do_echo(self, line):
-        print line.format(**self.__dict__)
+        print(line.format(**self.__dict__))
         
     def do_show(self, line):
         '''show recent entries'''
@@ -72,16 +77,45 @@ class TimeTracker(Cmd):
             val = int(line)
         except ValueError:
             val = 10
-        for code, subcode, name, start, end in \
-                self.conn.execute('select code, subcode, name, start, end '
-                                  'from events order by end asc limit ?', (val,)):
-            print '{} {} {} {}'.format(prettytimes(start, end), name, code, subcode or '-')
+        for id_, code, subcode, name, start, end in \
+                self.conn.execute('select id, code, subcode, name, start, end '
+                                  'from events order by id desc limit ?', (val,)):
+            print('{:5} - {} {} {} {}'.format(id_, prettytimes(start, end), code, 
+                                              subcode or ' ', name))
+
+    def do_fixdate(self, line):
+        '''Fix a date for a range of entries.
+        Example:
+        @:: fixdate 124-193 2012-11-02
+        '''
+        args = line.split(' ')
+        rng = map(int, args[0].split('-'))
+        dt = date(*map(int, args[1].split('-')))
+        for i in xrange(rng[0], rng[1] + 1):
+            with self.conn:
+                entry = self.conn.execute("SELECT start, end FROM {} WHERE id = ?"
+                                          .format(self.tablename), (i,)).next()
+                dt1 = entry[0].date()
+                tm1 = entry[0].time()
+                dt2 = entry[1].date()
+                tm2 = entry[1].time()
+                if dt2 > dt1:
+                    dt2 = dt + (dt2 - dt1)
+                dt1 = dt
+                self.conn.execute("UPDATE {} SET start=?, end=? WHERE id = ?"
+                                  .format(self.tablename),
+                                  (datetime.combine(dt1, tm1), datetime.combine(dt2, tm2), i))
+        print("Set entries {} through {} to {}".format(rng[0], rng[1], dt))
+        
+    def do_sql(self, sql):
+        for row in self.conn.execute(sql):
+            print(*row, sep=' | ')
 
     def onecmd(self, st):
         try:
             Cmd.onecmd(self, st)
         except Exception as e:
-            print e
+            print(e)
             
             
     def do_EOF(self, line):
@@ -91,4 +125,4 @@ if __name__ == '__main__':
     try:
         TimeTracker().cmdloop()
     except KeyboardInterrupt:
-        print "exit"
+        print("exit")

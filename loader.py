@@ -19,16 +19,30 @@ class TimeTracker(Cmd):
     def __init__(self, dbname='timetrack.db'):
         self.conn = sqlite3.connect(dbname, 
                  detect_types=sqlite3.PARSE_DECLTYPES| sqlite3.PARSE_COLNAMES)
-        self.tablename = 'events'
         try:
-            self.date = self.conn.execute("SELECT max(end) as 'end [timestamp]' from {}"\
-                                              .format(self.tablename)).next()[0].date()
+            self.date = self.conn.execute(
+                "SELECT max(end) as 'end [timestamp]' from events").next()[0].date()
         except Exception as e:
             print(e)
             self.date = date.today() - timedelta(1)
         print("Date is set for {}".format(self.date))
         self.prompt = '@:: '
         Cmd.__init__(self)
+        
+    def do_sql(self, sql):
+        with self.conn:
+            for row in self.conn.execute(sql):
+                print(*row, sep=' | ')
+
+    def onecmd(self, st):
+        try:
+            Cmd.onecmd(self, st)
+        except Exception as e:
+            print(e)
+            
+            
+    def do_EOF(self, line):
+        return True
 
     def default(self, entry):
         r'''Add a new entry to the timetrack database'''
@@ -48,9 +62,9 @@ class TimeTracker(Cmd):
 
     def do_create(self, line):
         with self.conn:
-            self.conn.execute('CREATE TABLE {} (id integer primary key autoincrement,'
+            self.conn.execute('CREATE TABLE events (id integer primary key autoincrement,'
                               'code text, subcode text, name text, start timestamp,'
-                              'end timestamp)'.format(self.tablename)
+                              'end timestamp)'
                          )
             print('Successfully initialized timetrack database.')
 
@@ -93,8 +107,8 @@ class TimeTracker(Cmd):
         dt = date(*map(int, args[1].split('-')))
         for i in xrange(rng[0], rng[1] + 1):
             with self.conn:
-                entry = self.conn.execute("SELECT start, end FROM {} WHERE id = ?"
-                                          .format(self.tablename), (i,)).next()
+                entry = self.conn.execute("SELECT start, end FROM events WHERE id = ?",
+                                          (i,)).next()
                 dt1 = entry[0].date()
                 tm1 = entry[0].time()
                 dt2 = entry[1].date()
@@ -102,24 +116,10 @@ class TimeTracker(Cmd):
                 if dt2 > dt1:
                     dt2 = dt + (dt2 - dt1)
                 dt1 = dt
-                self.conn.execute("UPDATE {} SET start=?, end=? WHERE id = ?"
-                                  .format(self.tablename),
+                self.conn.execute("UPDATE events SET start=?, end=? WHERE id = ?",
                                   (datetime.combine(dt1, tm1), datetime.combine(dt2, tm2), i))
         print("Set entries {} through {} to {}".format(rng[0], rng[1], dt))
-        
-    def do_sql(self, sql):
-        for row in self.conn.execute(sql):
-            print(*row, sep=' | ')
 
-    def onecmd(self, st):
-        try:
-            Cmd.onecmd(self, st)
-        except Exception as e:
-            print(e)
-            
-            
-    def do_EOF(self, line):
-        return True
 
 if __name__ == '__main__':
     try:

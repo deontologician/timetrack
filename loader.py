@@ -102,13 +102,22 @@ class TimeTracker(Cmd):
         
     def do_show(self, line):
         '''show recent entries'''
+        line = line.split()
+        sql = 'select id, code, subcode, name, start, end '\
+            'from events order by id desc limit ?'
         try:
-            val = int(line)
+            val = int(line[0])
         except ValueError:
-            val = 10
+            if line[0] == 'last':
+                val = 1
+            elif line[0] == 'like' and len(line) > 1:
+                sql = 'select id, code, subcode, name, start, end '\
+                    'from events where name like ? order by id desc'
+                val = '%'+line[1]+'%'
+            else:
+                val = 10
         for id_, code, subcode, name, start, end in \
-                self.conn.execute('select id, code, subcode, name, start, end '
-                                  'from events order by id desc limit ?', (val,)):
+                self.conn.execute(sql, (val,)):
             print('{:5} - {} {} {} {}'.format(id_, prettytimes(start, end), code, 
                                               subcode or ' ', name))
 

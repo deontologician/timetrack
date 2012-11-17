@@ -62,6 +62,19 @@ class TimeTracker(Cmd):
             self.conn.execute('INSERT INTO events (code, subcode, name, start, end)'
                               'VALUES (?, ?, ?, ?, ?)', (code, subcode, name, start, end))
 
+    def do_undo(self, line):
+        '''Undoes the last entry'''
+        with self.conn:
+            last_id, start, name = self.conn.execute(
+                'SELECT max(id), start, name FROM events').next()
+            print('Undoing last entry: {}'.format(name))
+            if start.date() < self.date:
+                self.date = self.date - timedelta(1)
+                print('Date moved backward to {}'.format(self.date))
+            self.conn.execute('DELETE FROM events WHERE id = ?', (last_id,))
+            print('Last entry is now:')
+            self.do_show('last')
+            
     def do_create(self, line):
         with self.conn:
             self.conn.execute('CREATE TABLE events (id integer primary key autoincrement,'

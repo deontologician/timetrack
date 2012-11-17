@@ -26,6 +26,8 @@ class TimeTracker(Cmd):
             print(e)
             self.date = date.today() - timedelta(1)
         print("Date is set for {}".format(self.date))
+        print('Last entry:')
+        self.do_show('last')
         self.prompt = '@:: '
         Cmd.__init__(self)
         
